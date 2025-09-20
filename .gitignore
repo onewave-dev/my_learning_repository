@@ -1,0 +1,22 @@
+.venv
+
+# Python кэш
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Логи
+*.log
+
+# Конфиги окружения
+.env
+*.env
+
+# IDE/редакторы
+.vscode/
+.idea/
+
+# ОС
+.DS_Store
+Thumbs.db
