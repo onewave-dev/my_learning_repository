@@ -17,10 +17,11 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logging.getLogger("httpx").setLevel(logging.WARNING)
+# Приглушаем болтливые логи библиотек, чтобы не светить токен
+logging.getLogger("telegram").setLevel(logging.WARNING)      # весь PTB
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)  # подсистема ext
+logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 log = logging.getLogger("app")
-
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
