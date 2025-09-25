@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 # Переменные окружения (добавим позже на Render и локально)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")  # временно
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 
 
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes", "on"}
@@ -38,13 +39,32 @@ async def lifespan(app: FastAPI):
     log.info("PTB Application created")
 
     # Переходим к работе приложения
+
+    await tg_app.initialize()   # подготовить внутренние ресурсы PTB (сессии, луп и т.д.)
+    await tg_app.start()        # запустить фоновые задачи PTB, чтобы обрабатывать update_queue
+    log.info("PTB Application started")
+
+    if not PUBLIC_URL:
+        log.error("PUBLIC_URL is empty — set it in env")
+        raise RuntimeError("No PUBLIC_URL")
+
+    webhook_url = f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
+    await tg_app.bot.set_webhook(
+        url=webhook_url,
+        secret_token=WEBHOOK_SECRET,      # Telegram пришлёт этот секрет в заголовке
+        drop_pending_updates=True,        # не тянуть «старые» апдейты
+        allowed_updates=["message"]       # на старте берём только сообщения
+    )
+    log.info("Webhook set to %s", webhook_url)  
+     
     yield
 
     # --- остановка приложения ---
     tg_app = getattr(app.state, "tg_app", None)
     if tg_app:
-        await tg_app.shutdown()
-        log.info("PTB Application shut down")
+        await tg_app.stop()       # остановить фоновые задачи (обработка очереди)
+        await tg_app.shutdown()   # корректно освободить ресурсы
+        log.info("PTB Application stopped")
 
 app = FastAPI(lifespan=lifespan)
 
