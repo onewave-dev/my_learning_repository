@@ -2,15 +2,13 @@ import os
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
-
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from app.handlers import start, echo
-
 from contextlib import asynccontextmanager
 
 # Переменные окружения (добавим позже на Render и локально)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")  # временно
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 
 
@@ -19,7 +17,9 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("app")
+
 
 
 @asynccontextmanager
@@ -48,15 +48,15 @@ async def lifespan(app: FastAPI):
         log.error("PUBLIC_URL is empty — set it in env")
         raise RuntimeError("No PUBLIC_URL")
 
-    webhook_url = f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
+    webhook_url = f"{PUBLIC_URL}/webhook"
     await tg_app.bot.set_webhook(
         url=webhook_url,
         secret_token=WEBHOOK_SECRET,      # Telegram пришлёт этот секрет в заголовке
         drop_pending_updates=True,        # не тянуть «старые» апдейты
         allowed_updates=["message"]       # на старте берём только сообщения
     )
-    log.info("Webhook set to %s", webhook_url)  
-     
+    log.info("Webhook set to %s", webhook_url) 
+
     yield
 
     # --- остановка приложения ---
@@ -73,12 +73,16 @@ async def healthz():
     log.debug("Health check requested")
     return {"status": "ok"}
 
-@app.post("/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request):
-    if secret != WEBHOOK_SECRET:
-        log.warning("Webhook with wrong secret")
-        raise HTTPException(status_code=403, detail="bad secret")
-     # 1) Читаем JSON из запроса
+@app.post("/webhook/")
+async def telegram_webhook(request: Request):  
+    # проверка: заголовок от Telegram
+    header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if header_secret != WEBHOOK_SECRET:
+        log.warning("Webhook header secret mismatch")
+        raise HTTPException(status_code=403, detail="bad header secret")
+    log.debug("Header OK, update accepted")
+
+    # 1) Читаем JSON из запроса
     data = await request.json()
 
     # 2) Превращаем JSON в объект Update (это PTB-шный класс)
