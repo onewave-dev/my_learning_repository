@@ -74,7 +74,7 @@ async def healthz():
     log.debug("Health check requested")
     return {"status": "ok"}
 
-@app.post("/webhook/")
+@app.post("/webhook")
 async def telegram_webhook(request: Request):  
     # проверка: заголовок от Telegram
     header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
