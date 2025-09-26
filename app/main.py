@@ -2,7 +2,8 @@ import os
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler  
+from telegram.ext import Application, CommandHandler, MessageHandler
+from telegram.ext import filters, ConversationHandler, PicklePersistence   
 from app.handlers import start, echo, help_command, survey_start, survey_name, survey_cancel, ASK_NAME, whoami
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
+DATA_PATH = os.getenv("DATA_PATH", "/var/data")
 
 
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes", "on"}
@@ -29,8 +31,19 @@ async def lifespan(app: FastAPI):
     if not TELEGRAM_BOT_TOKEN:
         log.error("TELEGRAM_BOT_TOKEN is empty — set it in env")
         raise RuntimeError("No TELEGRAM_BOT_TOKEN")
+    
+    # 🔹 гарантируем, что путь существует (работает в рантайме на диске)
+    os.makedirs(DATA_PATH, exist_ok=True)
 
-    tg_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    # 🔹 файл состояния на диске
+    persistence = PicklePersistence(filepath=os.path.join(DATA_PATH, "bot_state.pkl"))
+
+    tg_app = (
+    Application.builder()
+    .token(TELEGRAM_BOT_TOKEN)
+    .persistence(persistence)
+    .build()
+    )
 
     # ⬇️ Регистрируем хэндлеры PTB
     tg_app.add_handler(CommandHandler("start", start))

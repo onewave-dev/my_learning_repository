@@ -1,4 +1,4 @@
-.venv
+.venv/
 
 # Python кэш
 __pycache__/
@@ -20,3 +20,6 @@ __pycache__/
 # ОС
 .DS_Store
 Thumbs.db
+
+data/
+*.pkl
