@@ -8,7 +8,8 @@ from telegram.ext import (Application, CommandHandler, MessageHandler,
 from app.handlers import (
     start, echo, help_command,
     survey_start, survey_name, survey_cancel, ASK_NAME, whoami,
-    settings_command, settings_callback
+    settings_command, settings_callback, error_handler,
+    unknown_command
 )
 from contextlib import asynccontextmanager
 
@@ -67,7 +68,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("whoami", whoami))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     tg_app.add_handler(CallbackQueryHandler(settings_callback, pattern=r"^settings:"))
-
+    tg_app.add_error_handler(error_handler)
+    # Этот хэндлер ДОЛЖЕН быть последним, чтобы не перехватывать известные команды
+    tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     app.state.tg_app = tg_app
     log.info("PTB Application created")
 

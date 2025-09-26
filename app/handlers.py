@@ -1,5 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.error import TelegramError, TimedOut
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,6 +51,10 @@ async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Опрос отменён.")
     return ConversationHandler.END
 
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # короткая подсказка и направление к /help
+    await update.message.reply_text("Не знаю такую команду. Напиши /help 🙂")
+    
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = context.user_data.get("name")
     if name:
@@ -103,3 +108,23 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"Настройки:\nПодписка {new_state}.",
             reply_markup=reply_markup
         )
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    # 1) Тихо логируем стек с максимумом контекста
+    user_id = getattr(getattr(update, "effective_user", None), "id", None)
+    chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+    update_type = type(update).__name__ if update else "None"
+    context.application.logger.exception(
+        "Handler error | user=%s chat=%s update=%s",
+        user_id, chat_id, update_type
+    )
+
+    # 2) Аккуратно уведомим пользователя (если можно ответить)
+    try:
+        if update and getattr(update, "effective_message", None):
+            await update.effective_message.reply_text(
+                "Упс… Что-то пошло не так. Попробуйте ещё раз позже."
+            )
+    except (TelegramError, TimedOut):
+        # если даже ответить не удалось — просто молчим
+        pass
