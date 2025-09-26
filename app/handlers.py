@@ -28,7 +28,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "Команды:\n"
         "/start — поздороваться\n"
-        "/help — чем я умею помогать\n\n"
+        "/help — чем я умею помогать\n"
+        "/settings — открыть настройки\n"
         "Просто напишите текст — я отвечу эхом."
     )
     await update.message.reply_text(text)
@@ -56,3 +57,50 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ты представился как: {name}")
     else:
         await update.message.reply_text("Я пока не знаю, как тебя зовут. Запусти /survey 🙂")
+
+# /settings — показать кнопки
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 1) читаем текущее состояние (например, подписка)
+    is_subscribed = bool(context.user_data.get("subscribed"))
+
+    # 2) собираем клавиатуру (кнопки в один ряд)
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text="✅ Подписка ВКЛ" if is_subscribed else "🔔 Включить подписку",
+                callback_data="settings:toggle_sub"
+            ),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # 3) отправляем сообщение с клавиатурой
+    await update.message.reply_text("Настройки:", reply_markup=reply_markup)
+
+# обработка нажатий на кнопки из /settings
+async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # важно: подтвердить нажатие, чтобы Telegram убрал "часики"
+
+    # 1) проверяем, какая кнопка нажата
+    if query.data == "settings:toggle_sub":
+        # 2) переключаем флаг в user_data
+        is_subscribed = bool(context.user_data.get("subscribed"))
+        context.user_data["subscribed"] = not is_subscribed
+        new_state = "включена" if context.user_data["subscribed"] else "выключена"
+
+        # 3) обновляем текст сообщения и клавиатуру под новое состояние
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="✅ Подписка ВКЛ" if context.user_data["subscribed"] else "🔔 Включить подписку",
+                    callback_data="settings:toggle_sub"
+                ),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            text=f"Настройки:\nПодписка {new_state}.",
+            reply_markup=reply_markup
+        )
