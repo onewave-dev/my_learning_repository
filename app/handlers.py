@@ -28,9 +28,17 @@ async def survey_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def survey_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.message.text
+    context.user_data["name"] = user_name   # 📝 сохраняем в словарь user_data
     await update.message.reply_text(f"Приятно познакомиться, {user_name}!")
     return ConversationHandler.END
 
 async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Опрос отменён.")
     return ConversationHandler.END
+
+async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = context.user_data.get("name")
+    if name:
+        await update.message.reply_text(f"Ты представился как: {name}")
+    else:
+        await update.message.reply_text("Я пока не знаю, как тебя зовут. Запусти /survey 🙂")

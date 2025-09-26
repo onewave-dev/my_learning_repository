@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
         allow_reentry=True,  # позволит заново зайти в диалог, даже если пользователь был в нём
     )
     tg_app.add_handler(conv)
+    tg_app.add_handler(CommandHandler("whoami", whoami))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     app.state.tg_app = tg_app
