@@ -2,8 +2,8 @@ import os
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from app.handlers import start, echo, help_command
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler  
+from app.handlers import start, echo, help_command, survey_start, survey_name, survey_cancel, ASK_NAME
 from contextlib import asynccontextmanager
 
 # Переменные окружения 
@@ -35,6 +35,16 @@ async def lifespan(app: FastAPI):
     # ⬇️ Регистрируем хэндлеры PTB
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CommandHandler("help", help_command))
+    # Диалог: /survey -> спросить имя -> ответ -> завершить
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("survey", survey_start)],  # точка входа по /survey
+        states={
+            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, survey_name)],  # ждём текст имени
+        },
+        fallbacks=[CommandHandler("cancel", survey_cancel)],  # /cancel на любом шаге — выход
+        allow_reentry=True,  # позволит заново зайти в диалог, даже если пользователь был в нём
+    )
+    tg_app.add_handler(conv)
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     app.state.tg_app = tg_app

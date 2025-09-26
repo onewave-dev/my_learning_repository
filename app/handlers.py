@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -18,3 +18,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Просто напишите текст — я отвечу эхом."
     )
     await update.message.reply_text(text)
+
+# Обработчик диалога
+ASK_NAME = 0  # состояние диалога
+
+async def survey_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Давай познакомимся! Как тебя зовут?")
+    return ASK_NAME
+
+async def survey_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_name = update.message.text
+    await update.message.reply_text(f"Приятно познакомиться, {user_name}!")
+    return ConversationHandler.END
+
+async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Опрос отменён.")
+    return ConversationHandler.END
