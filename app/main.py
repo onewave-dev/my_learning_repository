@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler  
-from app.handlers import start, echo, help_command, survey_start, survey_name, survey_cancel, ASK_NAME
+from app.handlers import start, echo, help_command, survey_start, survey_name, survey_cancel, ASK_NAME, whoami
 from contextlib import asynccontextmanager
 
 # Переменные окружения 
