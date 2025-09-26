@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
         url=webhook_url,
         secret_token=WEBHOOK_SECRET,      # Telegram пришлёт этот секрет в заголовке
         drop_pending_updates=True,        # не тянуть «старые» апдейты
-        allowed_updates=["message"]       # на старте берём только сообщения
+        allowed_updates=["message", "callback_query"]
     )
     log.info("Webhook set to %s", webhook_url) 
 

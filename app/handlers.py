@@ -1,9 +1,8 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я твой первый бот 🙂")
     # счетчик запусков
     # 1) достаём старое значение (или 0, если его ещё нет)
     visits = context.user_data.get("visits", 0)
