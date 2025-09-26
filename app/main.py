@@ -3,10 +3,10 @@ import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from app.handlers import start, echo
+from app.handlers import start, echo, help_command
 from contextlib import asynccontextmanager
 
-# Переменные окружения (добавим позже на Render и локально)
+# Переменные окружения 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
 
     # ⬇️ Регистрируем хэндлеры PTB
     tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     app.state.tg_app = tg_app
