@@ -81,6 +81,16 @@ async def lifespan(app: FastAPI):
     await tg_app.start()        # запустить фоновые задачи PTB, чтобы обрабатывать update_queue
     log.info("PTB Application started")
 
+    # Меню команд в клиенте Telegram
+    await tg_app.bot.set_my_commands([
+        ("start", "Поздороваться и увидеть счётчик запусков"),
+        ("help", "Что умеет бот"),
+        ("survey", "Мини-опрос: спросить имя"),
+        ("settings", "Открыть настройки с кнопками"),
+        ("whoami", "Показать сохранённое имя"),
+    ])
+    log.info("Bot commands are set")
+
     if not PUBLIC_URL:
         log.error("PUBLIC_URL is empty — set it in env")
         raise RuntimeError("No PUBLIC_URL")
