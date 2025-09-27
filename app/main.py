@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
-    tg_app.add_handler(MessageHandler(filters.ALL, global_throttle), group=0)
+    # tg_app.add_handler(MessageHandler(filters.ALL, global_throttle), group=0)
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(CommandHandler("settings", settings_command))
