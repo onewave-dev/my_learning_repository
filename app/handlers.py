@@ -1,6 +1,40 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes, ConversationHandler, ApplicationHandlerStop
 from telegram.error import TelegramError, TimedOut
+
+from datetime import datetime, timezone
+
+THROTTLE_SECONDS = 1.0  # задержка от спама, время можно менять под себя
+
+# локальный throttle (защита от бот-сообщений)
+async def throttle_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Возвращает True, если можно продолжать обработку (порог не превышен),
+    и False, если нужно остановиться (слишком часто).
+    """
+    now = datetime.now(timezone.utc).timestamp()
+    last = context.user_data.get("last_msg_ts", 0.0)
+
+    if now - last < THROTTLE_SECONDS:
+        # вариант А: мягко подсказать (раскомментируй при желании)
+        await update.effective_message.reply_text("Немного подождите…")
+        return False
+
+    context.user_data["last_msg_ts"] = now
+    return True
+
+# глобальный throttle (защита от бот-сообщений)
+async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(timezone.utc).timestamp()
+    last = context.user_data.get("last_msg_ts", 0.0)
+
+    if now - last < THROTTLE_SECONDS:
+        # можно подсказать пользователю (по желанию):
+        await update.effective_message.reply_text("Слишком быстро 🙂")
+        raise ApplicationHandlerStop()
+
+    context.user_data["last_msg_ts"] = now
+    # Ничего не отвечаем, а позволяем пойти дальше по цепочке хэндлеров
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -21,6 +55,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Обработчик обычного текста (эхо)
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await throttle_guard(update, context):
+        return
     await update.message.reply_text(f"Ты сказал: {update.message.text}")
 
 
@@ -53,6 +89,8 @@ async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # короткий ответ на любые сообщения, которые не являются текстом/командой
+    if not await throttle_guard(update, context):
+        return
     await update.message.reply_text(
         "Я пока понимаю только текст и команды. Попробуй написать сообщение 🙂 или команду /help"
     )
@@ -67,6 +105,8 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ты представился как: {name}")
     else:
         await update.message.reply_text("Я пока не знаю, как тебя зовут. Запусти /survey 🙂")
+
+
 
 # /settings — показать кнопки
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

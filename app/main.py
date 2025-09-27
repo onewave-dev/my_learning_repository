@@ -9,7 +9,7 @@ from app.handlers import (
     start, echo, help_command,
     survey_start, survey_name, survey_cancel, ASK_NAME, whoami,
     settings_command, settings_callback, error_handler,
-    unknown_command, non_text
+    unknown_command, non_text, global_throttle
 )
 from contextlib import asynccontextmanager
 
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
+    tg_app.add_handler(MessageHandler(filters.ALL, global_throttle), group=0)
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(CommandHandler("settings", settings_command))
