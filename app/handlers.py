@@ -51,6 +51,12 @@ async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Опрос отменён.")
     return ConversationHandler.END
 
+async def non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # короткий ответ на любые сообщения, которые не являются текстом/командой
+    await update.message.reply_text(
+        "Я пока понимаю только текст и команды. Попробуй написать сообщение 🙂 или команду /help"
+    )
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # короткая подсказка и направление к /help
     await update.message.reply_text("Не знаю такую команду. Напиши /help 🙂")
