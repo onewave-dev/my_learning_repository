@@ -12,6 +12,7 @@ THROTTLE_SECONDS = 1.0  # задержка от спама, время можн�
 # глобальный throttle (защита от бот-сообщений)
 async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Глобальный ограничитель частоты для любого апдейта."""
+    log.debug("throttle: check")
     # 1) определяем пользователя (может не быть у некоторых апдейтов)
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None)
@@ -69,6 +70,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ASK_NAME = 0  # состояние диалога
 
 async def survey_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log.debug("start(): entered")
     await update.message.reply_text("Давай познакомимся! Как тебя зовут?")
     return ASK_NAME
 
