@@ -4,7 +4,8 @@ from telegram.error import TelegramError, TimedOut
 
 from datetime import datetime, timezone
 
-from app.main import log
+import logging
+log = logging.getLogger("app.handlers")  # дочерний логгер
 
 THROTTLE_SECONDS = 1.0  # задержка от спама, время можно менять под себя
 
