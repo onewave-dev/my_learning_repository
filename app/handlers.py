@@ -4,37 +4,33 @@ from telegram.error import TelegramError, TimedOut
 
 from datetime import datetime, timezone
 
+from app.main import log
+
 THROTTLE_SECONDS = 1.0  # задержка от спама, время можно менять под себя
-
-# локальный throttle (защита от бот-сообщений)
-async def throttle_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """
-    Возвращает True, если можно продолжать обработку (порог не превышен),
-    и False, если нужно остановиться (слишком часто).
-    """
-    now = datetime.now(timezone.utc).timestamp()
-    last = context.user_data.get("last_msg_ts", 0.0)
-
-    if now - last < THROTTLE_SECONDS:
-        # вариант А: мягко подсказать (раскомментируй при желании)
-        await update.effective_message.reply_text("Немного подождите…")
-        return False
-
-    context.user_data["last_msg_ts"] = now
-    return True
 
 # глобальный throttle (защита от бот-сообщений)
 async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Глобальный ограничитель частоты для любого апдейта."""
+    # 1) определяем пользователя (может не быть у некоторых апдейтов)
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return  # не знаем пользователя — не троттлим, пропускаем дальше
+
+    # 2) смотрим, когда этот пользователь писал в последний раз
     now = datetime.now(timezone.utc).timestamp()
     last = context.user_data.get("last_msg_ts", 0.0)
 
+    # 3) если слишком быстро — останавливаем конвейер целиком
     if now - last < THROTTLE_SECONDS:
-        # можно подсказать пользователю (по желанию):
-        await update.effective_message.reply_text("Слишком быстро 🙂")
-        raise ApplicationHandlerStop()
+        # по желанию можно подсказать пользователю (осторожно, чтобы не заспамить):
+        if getattr(update, "effective_message", None):
+            await update.effective_message.reply_text("Слишком быстро 🙂")
+            raise ApplicationHandlerStop()  # ← ключевая строка: «проглатываем» апдейт
 
+    # 4) иначе обновляем метку и пропускаем дальше
     context.user_data["last_msg_ts"] = now
-    # Ничего не отвечаем, а позволяем пойти дальше по цепочке хэндлеров
+    return  # обычный выход: следующие хэндлеры выполнятся
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,8 +51,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Обработчик обычного текста (эхо)
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await throttle_guard(update, context):
-        return
     await update.message.reply_text(f"Ты сказал: {update.message.text}")
 
 
@@ -89,8 +83,6 @@ async def survey_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def non_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # короткий ответ на любые сообщения, которые не являются текстом/командой
-    if not await throttle_guard(update, context):
-        return
     await update.message.reply_text(
         "Я пока понимаю только текст и команды. Попробуй написать сообщение 🙂 или команду /help"
     )
@@ -160,10 +152,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     user_id = getattr(getattr(update, "effective_user", None), "id", None)
     chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
     update_type = type(update).__name__ if update else "None"
+    log.exception("Handler error | user=%s chat=%s update=%s", user_id, chat_id, update_type)
     context.application.logger.exception(
         "Handler error | user=%s chat=%s update=%s",
         user_id, chat_id, update_type
     )
+
 
     # 2) Аккуратно уведомим пользователя (если можно ответить)
     try:

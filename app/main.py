@@ -3,7 +3,8 @@ import logging
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import (Application, CommandHandler, MessageHandler,
-    filters, ConversationHandler, PicklePersistence, CallbackQueryHandler
+    filters, ConversationHandler, PicklePersistence, CallbackQueryHandler,
+    TypeHandler
 )
 from app.handlers import (
     start, echo, help_command,
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
-    # tg_app.add_handler(MessageHandler(filters.ALL, global_throttle), group=0)
+    tg_app.add_handler(TypeHandler(Update, global_throttle), group=0)
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(CommandHandler("settings", settings_command))
