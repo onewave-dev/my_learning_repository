@@ -1,6 +1,9 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, ApplicationHandlerStop
 from telegram.error import TelegramError, TimedOut
+from telegram.constants import ChatAction
+
+import asyncio
 
 from datetime import datetime, timezone
 
@@ -64,6 +67,9 @@ ASK_NAME = 0  # состояние диалога
 
 async def survey_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.debug("start(): entered")
+    # 🔹 Показываем "печатает..." перед отправкой вопроса
+    await update.message.chat.send_action(ChatAction.TYPING)
+    await asyncio.sleep(2)  # небольшая пауза для "естественности"
     await update.message.reply_text("Давай познакомимся! Как тебя зовут?")
     return ASK_NAME
 
@@ -98,6 +104,8 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # /settings — показать кнопки
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.chat.send_action(ChatAction.TYPING)
+    await asyncio.sleep(1.2)
     # 1) читаем текущее состояние (например, подписка)
     is_subscribed = bool(context.user_data.get("subscribed"))
 
