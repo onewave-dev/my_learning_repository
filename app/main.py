@@ -30,6 +30,7 @@ logging.basicConfig(
 logging.getLogger("telegram").setLevel(logging.WARNING)      # весь PTB
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)  # подсистема ext
 logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
+logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
 
 @asynccontextmanager
