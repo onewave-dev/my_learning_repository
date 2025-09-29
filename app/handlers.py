@@ -17,14 +17,28 @@ async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None)
     if user_id is None:
-        return  # нет пользователя — не троттлим
+        return  # системные апдейты не троттлим
+
+    msg = getattr(update, "effective_message", None)
+
+    # 1) Команды не троттлим, чтобы /start всегда проходил
+    if msg and msg.entities:
+        for ent in msg.entities:
+            if ent.type == MessageEntityType.BOT_COMMAND:
+                # обновим таймстамп и пропустим
+                context.user_data["last_msg_ts"] = datetime.now(timezone.utc).timestamp()
+                return
 
     now = datetime.now(timezone.utc).timestamp()
-    last = context.user_data.get("last_msg_ts", 0.0)
+    last = float(context.user_data.get("last_msg_ts", 0.0))
 
+    # 2) Защита от "час назад/вперёд": если last в будущем — сбрасываем
+    if last > now:
+        last = 0.0
+
+    # 3) Собственно лимит
     if now - last < THROTTLE_SECONDS:
-        # НЕ отвечаем в чат (чтобы не спамить),
-        # просто жёстко прерываем обработку этого апдейта
+        # молча гасим только "слишком частые" не-командные апдейты
         raise ApplicationHandlerStop()
 
     context.user_data["last_msg_ts"] = now
