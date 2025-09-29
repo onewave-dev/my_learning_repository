@@ -138,7 +138,10 @@ async def telegram_webhook(request: Request):
     update = Update.de_json(data, app.state.tg_app.bot)
 
     # 3) Кладём Update в очередь PTB
-    await app.state.tg_app.update_queue.put(update)
+    # await app.state.tg_app.update_queue.put(update)
+
+    # 3a) ✅ Напрямую передаём апдейт в PTB (минуя очередь)
+    await app.state.tg_app.process_update(update)
 
     log.debug("Update forwarded to PTB")
     return {"ok": True}
