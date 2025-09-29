@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, ApplicationHandlerStop
 from telegram.error import TelegramError, TimedOut
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, MessageEntityType
 
 import asyncio
 
