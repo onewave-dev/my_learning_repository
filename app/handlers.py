@@ -46,6 +46,7 @@ async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log.debug("start(): entered")
     # счетчик запусков
     # 1) достаём старое значение (или 0, если его ещё нет)
     visits = context.user_data.get("visits", 0)
