@@ -27,8 +27,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 # Приглушаем болтливые логи библиотек, чтобы не светить токен
-logging.getLogger("telegram").setLevel(logging.WARNING)      # весь PTB
-logging.getLogger("telegram.ext").setLevel(logging.WARNING)  # подсистема ext
+# logging.getLogger("telegram").setLevel(logging.WARNING)      # весь PTB
+# logging.getLogger("telegram.ext").setLevel(logging.WARNING)  # подсистема ext
 logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
