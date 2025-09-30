@@ -54,9 +54,9 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
+    tg_app.add_handler(TypeHandler(Update, global_throttle), group=0) # всегда в самом начале
     tg_app.add_handler(CommandHandler("start", start))
     log.info("Start handler registered")
-    tg_app.add_handler(TypeHandler(Update, global_throttle), group=0)
     tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(CommandHandler("settings", settings_command))
     # Диалог: /survey -> спросить имя -> ответ -> завершить

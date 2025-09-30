@@ -21,13 +21,12 @@ async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = getattr(update, "effective_message", None)
 
-    # 1) Команды не троттлим, чтобы /start всегда проходил
-    if msg and msg.entities:
-        for ent in msg.entities:
-            if ent.type == MessageEntityType.BOT_COMMAND:
-                # обновим таймстамп и пропустим
-                context.user_data["last_msg_ts"] = datetime.now(timezone.utc).timestamp()
-                return
+    # 1) Команды не троттлим, чтобы /start и др. всегда проходили
+    if msg and (
+        (msg.entities and any(ent.type == MessageEntityType.BOT_COMMAND for ent in msg.entities))
+        or (msg.text and msg.text.startswith("/"))
+    ):
+        return
 
     now = datetime.now(timezone.utc).timestamp()
     last = float(context.user_data.get("last_msg_ts", 0.0))
@@ -68,6 +67,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log.debug("help(): entered")
     text = (
         "Команды:\n"
         "/start — поздороваться\n"
