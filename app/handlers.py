@@ -13,35 +13,33 @@ log = logging.getLogger("app.handlers")  # дочерний логгер
 THROTTLE_SECONDS = 1.0  # задержка от спама, время можно менять под себя
 
 # глобальный throttle (защита от бот-сообщений)
-async def global_throttle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = getattr(update, "effective_user", None)
-    user_id = getattr(user, "id", None)
-    if user_id is None:
-        return  # системные апдейты не троттлим
-
+async def global_throttle(update, context):
+    """
+    Пропускает команды всегда.
+    Троттлит только обычные сообщения, если они слишком частые.
+    Работает ТОЛЬКО на Message updates (см. регистрацию ниже).
+    """
     msg = getattr(update, "effective_message", None)
+    if not msg:
+        return  # не message-апдейт -> нас это не касается
 
-    # 1) Команды не троттлим, чтобы /start и др. всегда проходили
-    if msg and (
-        (msg.entities and any(ent.type == MessageEntityType.BOT_COMMAND for ent in msg.entities))
-        or (msg.text and msg.text.startswith("/"))
-    ):
+    # 1) Команды пропускаем всегда (и не трогаем last_msg_ts)
+    if (msg.entities and any(ent.type == MessageEntityType.BOT_COMMAND for ent in msg.entities)) \
+       or (msg.text and msg.text.startswith("/")):
         return
 
     now = datetime.now(timezone.utc).timestamp()
-    last = float(context.user_data.get("last_msg_ts", 0.0))
-
-    # 2) Защита от "час назад/вперёд": если last в будущем — сбрасываем
-    if last > now:
+    try:
+        last = float(context.user_data.get("last_msg_ts", 0.0))
+    except Exception:
         last = 0.0
 
-    # 3) Собственно лимит
-    if now - last < THROTTLE_SECONDS:
-        # молча гасим только "слишком частые" не-командные апдейты
+    # 2) Если слишком часто — стопим цепочку хэндлеров (но без падений)
+    if last and (now - last) < THROTTLE_SECONDS:
         raise ApplicationHandlerStop()
 
+    # 3) Иначе обновляем таймстамп и пропускаем дальше
     context.user_data["last_msg_ts"] = now
-    # обычный return → остальные хэндлеры выполнятся
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -14,6 +14,16 @@ from app.handlers import (
 )
 from contextlib import asynccontextmanager
 
+# --- ВЕРХ ФАЙЛА (рядом с импортами) ---
+def _probe(tag):
+    async def _inner(update, context):
+        msg = getattr(update, "effective_message", None)
+        txt = getattr(msg, "text", None)
+        log.warning("PROBE %s | has_message=%s | text=%r | entities=%s",
+                    tag, bool(msg), txt,
+                    getattr(msg, "entities", None))
+    return _inner
+
 # Переменные окружения 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")
@@ -27,8 +37,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 # Приглушаем болтливые логи библиотек, чтобы не светить токен
-# logging.getLogger("telegram").setLevel(logging.WARNING)      # весь PTB
-# logging.getLogger("telegram.ext").setLevel(logging.WARNING)  # подсистема ext
+logging.getLogger("telegram").setLevel(logging.DEBUG)
+logging.getLogger("telegram.ext").setLevel(logging.DEBUG)
 logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
@@ -54,11 +64,18 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("A:TOP"), block=False), group=0) # 0a. Зонд до всего (он НЕ блокирует)
     tg_app.add_handler(MessageHandler(filters.ALL, global_throttle, block=False), group=0) # всегда в самом начале
-    tg_app.add_handler(CommandHandler("start", start))
+    # 0c. Зонд прямо перед командами (чтобы видеть, что до сюда дошло)
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("B:BEFORE_CMDS"), block=False), group=0)tg_app.add_handler(CommandHandler("start", start))
     log.info("Start handler registered")
+    tg_app.add_handler(CommandHandler("whoami", whoami))
     tg_app.add_handler(CommandHandler("help", help_command))
     tg_app.add_handler(CommandHandler("settings", settings_command))
+
+    # 1b. Зонд после команд
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("C:AFTER_CMDS"), block=False), group=0)
+    tg_app.add_handler(CallbackQueryHandler(settings_callback, pattern=r"^settings:"))
     # Диалог: /survey -> спросить имя -> ответ -> завершить
     conv = ConversationHandler(
         entry_points=[CommandHandler("survey", survey_start)],  # точка входа по /survey
@@ -69,9 +86,7 @@ async def lifespan(app: FastAPI):
         allow_reentry=True,  # позволит заново зайти в диалог, даже если пользователь был в нём
     )
     tg_app.add_handler(conv)
-    tg_app.add_handler(CommandHandler("whoami", whoami))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    tg_app.add_handler(CallbackQueryHandler(settings_callback, pattern=r"^settings:"))
     tg_app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, non_text))     # всё, что не текст и не команды: фото, стикеры, файлы и т.д.
     tg_app.add_error_handler(error_handler)
     tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))     # Этот хэндлер ДОЛЖЕН быть последним, чтобы не перехватывать известные команды
