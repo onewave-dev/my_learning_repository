@@ -6,10 +6,10 @@ import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import (Application, CommandHandler, MessageHandler,
-    filters, ConversationHandler, BasePersistence, CallbackQueryHandler,
-    TypeHandler
+    filters, ConversationHandler, CallbackQueryHandler,
+    PicklePersistence
 )
-from supabase import create_client
+from supabase import create_client, Client
 from app.handlers import (
     start, echo, help_command,
     survey_start, survey_name, survey_cancel, ASK_NAME, whoami,
@@ -17,6 +17,8 @@ from app.handlers import (
     unknown_command, non_text, global_throttle
 )
 from contextlib import asynccontextmanager
+
+from app.supabase_persistence import SupabasePersistence
 
 # --- ВЕРХ ФАЙЛА (рядом с импортами) ---
 def _probe(tag):
@@ -41,49 +43,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 # Приглушаем болтливые логи библиотек, чтобы не светить токен
-logging.getLogger("telegram").setLevel(logging.DEBUG)
-logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.INFO)
+logging.getLogger("telegram.ext").setLevel(logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
 
-# устновка persistence
-class SupabasePersistence(BasePersistence):
-    def __init__(self, url, key):
-        super().__init__(store_user_data=True, store_chat_data=True, store_bot_data=True)
-        self.client = create_client(url, key)
-        self.table = "bot_state"
-
-    async def _load(self, key):
-        res = self.client.table(self.table).select("data").eq("id", key).execute()
-        if res.data:
-            return res.data[0]["data"]
-        return {}
-
-    async def _save(self, key, data):
-        self.client.table(self.table).upsert({"id": key, "data": data}).execute()
-
-    async def get_user_data(self):
-        return await self._load("user_data")
-
-    async def update_user_data(self, user_id, data):
-        await self._save(f"user_{user_id}", data)
-
-    async def get_chat_data(self):
-        return await self._load("chat_data")
-
-    async def update_chat_data(self, chat_id, data):
-        await self._save(f"chat_{chat_id}", data)
-
-    async def get_bot_data(self):
-        return await self._load("bot_data")
-
-    async def update_bot_data(self, data):
-        await self._save("bot_data", data)
-
-    async def flush(self):
-        # метод для PTB (здесь ничего не нужно)
-        pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -99,8 +64,13 @@ async def lifespan(app: FastAPI):
     # 🔹 файл состояния на диске
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY") 
-    persistence = SupabasePersistence(SUPABASE_URL, SUPABASE_KEY)
-    
+    if SUPABASE_URL and SUPABASE_KEY:
+        persistence = SupabasePersistence(SUPABASE_URL, SUPABASE_KEY)
+        log.info("Using SupabasePersistence")
+    else:
+        os.makedirs(DATA_PATH, exist_ok=True)
+        persistence = PicklePersistence(filepath=os.path.join(DATA_PATH, "bot_state.pkl"))
+        log.warning("SUPABASE_* env not set → using PicklePersistence at %s", DATA_PATH)
     tg_app = (
     Application.builder()
     .token(TELEGRAM_BOT_TOKEN)
