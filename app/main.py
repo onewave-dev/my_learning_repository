@@ -38,7 +38,7 @@ logging.basicConfig(
 )
 # Приглушаем болтливые логи библиотек, чтобы не светить токен
 logging.getLogger("telegram").setLevel(logging.DEBUG)
-logging.getLogger("telegram.ext").setLevel(logging.DEBUG)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
@@ -67,7 +67,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.ALL, _probe("A:TOP"), block=False), group=0) # 0a. Зонд до всего (он НЕ блокирует)
     tg_app.add_handler(MessageHandler(filters.ALL, global_throttle, block=False), group=0) # всегда в самом начале
     # 0c. Зонд прямо перед командами (чтобы видеть, что до сюда дошло)
-    tg_app.add_handler(MessageHandler(filters.ALL, _probe("B:BEFORE_CMDS"), block=False), group=0)tg_app.add_handler(CommandHandler("start", start))
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("B:BEFORE_CMDS"), block=False), group=0)
+    tg_app.add_handler(CommandHandler("start", start))
     log.info("Start handler registered")
     tg_app.add_handler(CommandHandler("whoami", whoami))
     tg_app.add_handler(CommandHandler("help", help_command))
