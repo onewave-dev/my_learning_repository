@@ -49,13 +49,12 @@ class SupabasePersistence(BasePersistence):
         on_flush: bool = True,
     ):
         # В PTB BasePersistence эти флаги нужно явно передать в super()
-        super().__init__(
-            store_user_data=store_user_data,
-            store_chat_data=store_chat_data,
-            store_bot_data=store_bot_data,
-            update_interval=0,  # управляем сохранением сами
-            on_flush=on_flush,
-        )
+        # Сохраним флаги в своих атрибутах, а super вызовем без них
+        self.store_user_data = store_user_data
+        self.store_chat_data = store_chat_data
+        self.store_bot_data  = store_bot_data
+        super().__init__(update_interval=0, on_flush=on_flush)
+        
         self.client: Client = create_client(url, key)
         self.table = table
 
