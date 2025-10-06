@@ -37,15 +37,21 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 DATA_PATH = os.getenv("DATA_PATH", "/var/data")
 
 
-DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes", "on"}
+# ✅ Настройка уровня логирования
 logging.basicConfig(
-    level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO  # ← вместо DEBUG
 )
+
+# ✅ Отключаем болтливые библиотеки
+for noisy in ["hpack", "httpcore", "httpx", "urllib3"]:
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
 # Приглушаем болтливые логи библиотек, чтобы не светить токен
 logging.getLogger("telegram").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)         # сетевые запросы
 logging.getLogger("app.handlers").setLevel(logging.DEBUG)
 log = logging.getLogger("app")
 
