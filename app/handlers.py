@@ -165,23 +165,28 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    # 1) Тихо логируем стек с максимумом контекста
-    user_id = getattr(getattr(update, "effective_user", None), "id", None)
-    chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
-    update_type = type(update).__name__ if update else "None"
-    log.exception("Handler error | user=%s chat=%s update=%s", user_id, chat_id, update_type)
-    context.application.logger.exception(
-        "Handler error | user=%s chat=%s update=%s",
-        user_id, chat_id, update_type
-    )
-
-
-    # 2) Аккуратно уведомим пользователя (если можно ответить)
     try:
-        if update and getattr(update, "effective_message", None):
-            await update.effective_message.reply_text(
-                "Упс… Что-то пошло не так. Попробуйте ещё раз позже."
-            )
-    except (TelegramError, TimedOut):
-        # если даже ответить не удалось — просто молчим
-        pass
+        # Соберём максимум контекста, ничего не предполагая
+        user_id = getattr(getattr(update, "effective_user", None), "id", None)
+        chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+        update_type = type(update).__name__ if update else "None"
+
+        # Логируем стек через наш логгер модуля (а не через context.application)
+        # context.error в PTB содержит исходное исключение, если доступно
+        log.exception(
+            "Handler error | user=%s chat=%s update=%s",
+            user_id, chat_id, update_type,
+            exc_info=getattr(context, "error", None),
+        )
+
+        # Попробуем аккуратно уведомить пользователя
+        msg = getattr(update, "effective_message", None)
+        if msg:
+            try:
+                await msg.reply_text("Упс… Что-то пошло не так. Попробуйте ещё раз позже.")
+            except (TelegramError, TimedOut):
+                pass
+
+    except Exception:
+        # На крайний случай — тихо проглотить, чтобы error_handler не зацикливал падения
+        logging.getLogger("app.handlers").exception("error_handler() failed safely")
