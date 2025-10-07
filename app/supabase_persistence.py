@@ -101,22 +101,21 @@ class SupabasePersistence(BasePersistence):
 
     # ---------- Реализация обязательных методов BasePersistence ----------
 
-    def get_user_data(self) -> DefaultDict[int, Dict[str, Any]]:
+    async def get_user_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._user_data
 
-    def get_chat_data(self) -> DefaultDict[int, Dict[str, Any]]:
+    async def get_chat_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._chat_data
 
-    def get_bot_data(self) -> Dict[str, Any]:
+    async def get_bot_data(self) -> Dict[str, Any]:
         return self._bot_data
 
-    def get_callback_data(self) -> Optional[Dict[str, Any]]:
-        # PTB допускает None, если callback_data не используется
+    async def get_callback_data(self) -> Optional[Dict[str, Any]]:
         return self._callback_data
 
-    def get_conversations(self, name: str) -> Dict[Tuple[Hashable, Hashable], Any]:
+    async def get_conversations(self, name: str) -> Dict[Tuple[Hashable, Hashable], Any]:
         return self._conversations.get(name, {})
-    
+        
 
     # --- update* вызываются PTB после каждого изменения данных ---
 
@@ -140,7 +139,7 @@ class SupabasePersistence(BasePersistence):
         self._bot_data = data
         if self.flush_on_update:
             self.flush()
-            
+
     def refresh_bot_data(self, bot_data: Dict[str, Any]) -> None:
         self._bot_data = bot_data or {}
         if self.flush_on_update:
