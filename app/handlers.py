@@ -1,7 +1,8 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, ApplicationHandlerStop
-from telegram.error import TelegramError, TimedOut
+from telegram.error import TelegramError, TimedOut, BadRequest, Forbidden
 from telegram.constants import ChatAction, MessageEntityType
+import logging
 
 import asyncio
 
@@ -164,29 +165,37 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: object, context):
     try:
-        # Соберём максимум контекста, ничего не предполагая
         user_id = getattr(getattr(update, "effective_user", None), "id", None)
         chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
         update_type = type(update).__name__ if update else "None"
 
-        # Логируем стек через наш логгер модуля (а не через context.application)
-        # context.error в PTB содержит исходное исключение, если доступно
-        log.exception(
-            "Handler error | user=%s chat=%s update=%s",
-            user_id, chat_id, update_type,
-            exc_info=getattr(context, "error", None),
-        )
+        exc = getattr(context, "error", None)
 
-        # Попробуем аккуратно уведомить пользователя
+        if exc is not None:
+            # Явно передаём traceback, чтобы не было "NoneType: None"
+            log.error(
+                "Handler error | user=%s chat=%s update=%s: %s",
+                user_id, chat_id, update_type, exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+        else:
+            # Нет исключения в context.error — просто сообщение без стека
+            log.error("Handler error | user=%s chat=%s update=%s (no context.error)",
+                      user_id, chat_id, update_type)
+
+        # Аккуратно уведомим пользователя, если есть куда писать
         msg = getattr(update, "effective_message", None)
         if msg:
             try:
                 await msg.reply_text("Упс… Что-то пошло не так. Попробуйте ещё раз позже.")
-            except (TelegramError, TimedOut):
+            except (BadRequest, Forbidden, TelegramError, TimedOut):
+                # Никогда не роняем error_handler из-за сетевых/правовых ошибок
                 pass
 
-    except Exception:
-        # На крайний случай — тихо проглотить, чтобы error_handler не зацикливал падения
-        logging.getLogger("app.handlers").exception("error_handler() failed safely")
+    except Exception as e:
+        # Последняя страховка — логируем, но не пробрасываем
+        logging.getLogger("app.handlers").error(
+            "error_handler() failed safely: %s", e, exc_info=True
+        )
