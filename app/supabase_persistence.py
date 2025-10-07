@@ -1,244 +1,287 @@
-import os
-import json
-from collections import defaultdict
-from typing import Any, DefaultDict, Dict, Hashable, Tuple
+# app/supabase_persistence.py
 
-from telegram.ext import BasePersistence
+from __future__ import annotations
+
+import json
+import logging
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, Hashable, Tuple, Optional
 
 from supabase import create_client, Client
+from telegram.ext import BasePersistence, PersistenceInput, _utils
+
+log = logging.getLogger("app.supabase")
 
 
-# -----------------------------
-# Ключи, по которым храним данные
-# -----------------------------
-def _k_user(uid: int) -> str:
-    return f"user_data:{uid}"
+def _conv_key_encode(key: Tuple[Hashable, Hashable]) -> str:
+    """
+    Сериализация ключа разговора (chat_id, thread_id) -> строка.
+    PTB использует tuple[chat_id, thread_id] как ключ в conversations.
+    """
+    chat_id, thread_id = key
+    return f"{chat_id}:{thread_id if thread_id is not None else ''}"
 
-def _k_chat(cid: int) -> str:
-    return f"chat_data:{cid}"
 
-def _k_bot() -> str:
-    return "bot_data"
-
-def _k_conversations(name: str) -> str:
-    return f"conversations:{name}"
-
-def _k_callback() -> str:
-    return "callback_data"
+def _conv_key_decode(s: str) -> Tuple[Hashable, Hashable]:
+    """Обратная операция для _conv_key_encode."""
+    if ":" not in s:
+        return (int(s), None)
+    chat_str, thread_str = s.split(":", 1)
+    chat_id = int(chat_str) if chat_str else None
+    thread_id = int(thread_str) if thread_str else None if thread_str != "" else None
+    return (chat_id, thread_id)
 
 
 class SupabasePersistence(BasePersistence):
     """
-    PTB 22.4 совместимая реализация Persistence для Supabase.
-    Хранит:
-      - user_data:*          -> dict
-      - chat_data:*          -> dict
-      - bot_data             -> dict
-      - conversations:*      -> dict[(tuple(chat_id, user_id) | ...)] -> state
-      - callback_data        -> dict
+    Persistence для python-telegram-bot, сохраняющий состояние в Supabase.
+
+    В таблице `bot_state` держим 5 строк:
+      - <prefix>:user_data
+      - <prefix>:chat_data
+      - <prefix>:bot_data
+      - <prefix>:conversations
+      - <prefix>:callback_data
+
+    Где `data` — это JSON.
     """
+
     def __init__(
         self,
-        url: str,
-        key: str,
+        supabase_url: str,
+        supabase_key: str,
         table: str = "bot_state",
-        *,
-        store_user_data: bool = True,
-        store_chat_data: bool = True,
-        store_bot_data: bool = True,
-    ):
-        # В PTB BasePersistence эти флаги нужно явно передать в super()
-        # Сохраним флаги в своих атрибутах, а super вызовем без них
-        self.store_user_data = store_user_data
-        self.store_chat_data = store_chat_data
-        self.store_bot_data  = store_bot_data
-        super().__init__(update_interval=0)
+        prefix: str = "main",
+        store_data: Optional[PersistenceInput] = None,
+        flush_on_update: bool = True,
+    ) -> None:
+        super().__init__(store_data=store_data)
+        self.client: Client = create_client(supabase_url, supabase_key)
+        self.table: str = table
+        self.prefix: str = prefix
+        self.flush_on_update: bool = flush_on_update
 
-        self.client: Client = create_client(url, key)
-        self.table = table
-
-        # Локальный кэш, чтобы не дергать БД каждый раз
+        # Локальные кэши (как в DictPersistence)
         self._user_data: DefaultDict[int, Dict[str, Any]] = defaultdict(dict)
         self._chat_data: DefaultDict[int, Dict[str, Any]] = defaultdict(dict)
         self._bot_data: Dict[str, Any] = {}
-        self._conversations: Dict[str, Dict[Tuple[Hashable, ...], Any]] = defaultdict(dict)
+        self._conversations: Dict[str, Dict[Tuple[Hashable, Hashable], Any]] = {}
         self._callback_data: Dict[str, Any] = {}
 
-        self._loaded = False
+        # Загружаем состояние один раз при инициализации
+        self._load_all()
 
-    # ---------- ВСПОМОГАТЕЛЬНЫЕ ----------
-    def _get_row(self, key: str) -> Dict[str, Any] | None:
-        res = self.client.table(self.table).select("data").eq("id", key).execute()
-        if res.data:
-            return res.data[0]["data"]
-        return None
+    # ---------- Публичные вспомогательные методы ----------
 
-    def _upsert_row(self, key: str, data: Any) -> None:
-        self.client.table(self.table).upsert({"id": key, "data": data}).execute()
+    async def health_check(self) -> None:
+        """
+        Fail-fast проверка доступности Supabase и таблицы.
+        Выполняет select + upsert тестовой записи и удаляет её.
+        """
+        # 1) лёгкий SELECT
+        try:
+            _ = self.client.table(self.table).select("id").limit(1).execute()
+        except Exception as e:
+            raise RuntimeError(f"Cannot select from table '{self.table}': {e}")
 
-    def _delete_row(self, key: str) -> None:
-        self.client.table(self.table).delete().eq("id", key).execute()
+        # 2) пробный round-trip
+        probe_id = f"{self.prefix}:__healthcheck__"
+        try:
+            self.client.table(self.table).upsert({"id": probe_id, "data": {"ok": True}}).execute()
+            got = self.client.table(self.table).select("data").eq("id", probe_id).execute()
+            if not got.data:
+                raise RuntimeError("Upsert succeeded but select returned no data")
+        except Exception as e:
+            raise RuntimeError(f"Cannot upsert/select in '{self.table}': {e}")
+        finally:
+            try:
+                self.client.table(self.table).delete().eq("id", probe_id).execute()
+            except Exception:
+                logging.getLogger("app.handlers").warning("Healthcheck cleanup failed", exc_info=True)
 
-    def _ensure_loaded(self) -> None:
-        if self._loaded:
-            return
-        # Ничего «массово» не грузим — лениво тянем по ключам, когда это понадобится.
-        self._loaded = True
+    # ---------- Реализация обязательных методов BasePersistence ----------
 
-    # ---------- Требуемые абстрактные методы PTB ----------
-
-    # ---- user_data ----
-    async def get_user_data(self) -> DefaultDict[int, Dict[str, Any]]:
-        self._ensure_loaded()
+    def get_user_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._user_data
 
-    async def update_user_data(self, user_id: int, data: Dict[str, Any]) -> None:
-        self._ensure_loaded()
-        self._user_data[user_id] = data or {}
-        if self.store_user_data:
-            self._upsert_row(_k_user(user_id), self._user_data[user_id])
-
-    async def drop_user_data(self, user_id: int) -> None:
-        self._ensure_loaded()
-        self._user_data.pop(user_id, None)
-        if self.store_user_data:
-            self._delete_row(_k_user(user_id))
-
-    async def refresh_user_data(self) -> None:
-        # Перезагрузка из БД (лениво: подгружаем только те user_id, что уже в кэше)
-        for uid in list(self._user_data.keys()):
-            row = self._get_row(_k_user(uid))
-            self._user_data[uid] = row or {}
-
-    # ---- chat_data ----
-    async def get_chat_data(self) -> DefaultDict[int, Dict[str, Any]]:
-        self._ensure_loaded()
+    def get_chat_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._chat_data
 
-    async def update_chat_data(self, chat_id: int, data: Dict[str, Any]) -> None:
-        self._ensure_loaded()
-        self._chat_data[chat_id] = data or {}
-        if self.store_chat_data:
-            self._upsert_row(_k_chat(chat_id), self._chat_data[chat_id])
-
-    async def drop_chat_data(self, chat_id: int) -> None:
-        self._ensure_loaded()
-        self._chat_data.pop(chat_id, None)
-        if self.store_chat_data:
-            self._delete_row(_k_chat(chat_id))
-
-    async def refresh_chat_data(self) -> None:
-        for cid in list(self._chat_data.keys()):
-            row = self._get_row(_k_chat(cid))
-            self._chat_data[cid] = row or {}
-
-    # ---- bot_data ----
-    async def get_bot_data(self) -> Dict[str, Any]:
-        self._ensure_loaded()
-        if not self._bot_data and self.store_bot_data:
-            row = self._get_row(_k_bot())
-            if isinstance(row, dict):
-                self._bot_data = row
+    def get_bot_data(self) -> Dict[str, Any]:
         return self._bot_data
 
-    async def update_bot_data(self, data: Dict[str, Any]) -> None:
-        self._ensure_loaded()
-        self._bot_data = data or {}
-        if self.store_bot_data:
-            self._upsert_row(_k_bot(), self._bot_data)
+    def get_callback_data(self) -> Optional[Dict[str, Any]]:
+        # PTB допускает None, если callback_data не используется
+        return self._callback_data
 
-    async def refresh_bot_data(self) -> None:
-        row = self._get_row(_k_bot())
-        self._bot_data = row or {}
+    def get_conversations(self, name: str) -> Dict[Tuple[Hashable, Hashable], Any]:
+        return self._conversations.get(name, {})
 
-    # ---- conversations ----
-    async def get_conversations(self, name: str) -> Dict[Tuple[Hashable, ...], Any]:
-        self._ensure_loaded()
-        # Ленивая загрузка набора по имени
-        if name not in self._conversations:
-            row = self._get_row(_k_conversations(name))
-            if isinstance(row, dict):
-                # ключи в JSON — строки, превращаем обратно в tuples
-                restored: Dict[Tuple[Hashable, ...], Any] = {}
-                for k, v in row.items():
-                    restored[tuple(json.loads(k))] = v
-                self._conversations[name] = restored
-            else:
-                self._conversations[name] = {}
-        return self._conversations[name]
+    # --- update* вызываются PTB после каждого изменения данных ---
 
-    async def update_conversation(self, name: str, key: Tuple[Hashable, ...], new_state: Any) -> None:
-        self._ensure_loaded()
-        conv = await self.get_conversations(name)
+    def update_user_data(self, user_id: int, data: Dict[str, Any]) -> None:
+        if not self.store_data.user_data:
+            return
+        self._user_data[user_id] = data
+        if self.flush_on_update:
+            self.flush()
+
+    def update_chat_data(self, chat_id: int, data: Dict[str, Any]) -> None:
+        if not self.store_data.chat_data:
+            return
+        self._chat_data[chat_id] = data
+        if self.flush_on_update:
+            self.flush()
+
+    def update_bot_data(self, data: Dict[str, Any]) -> None:
+        if not self.store_data.bot_data:
+            return
+        self._bot_data = data
+        if self.flush_on_update:
+            self.flush()
+
+    def update_callback_data(self, data: Dict[str, Any]) -> None:
+        if not self.store_data.callback_data:
+            return
+        self._callback_data = data
+        if self.flush_on_update:
+            self.flush()
+
+    def update_conversation(
+        self,
+        name: str,
+        key: Tuple[Hashable, Hashable],
+        new_state: Any,
+    ) -> None:
+        if not self.store_data.conversations:
+            return
+        conv = self._conversations.setdefault(name, {})
         if new_state is None:
+            # PTB convention: remove conversation when state is None
             conv.pop(key, None)
         else:
             conv[key] = new_state
+        if self.flush_on_update:
+            self.flush()
 
-        # сериализуем tuple-ключ в строку (JSON-массив)
-        to_store: Dict[str, Any] = {json.dumps(list(k)): v for k, v in conv.items()}
-        self._upsert_row(_k_conversations(name), to_store)
+    def drop_user_data(self, user_id: int) -> None:
+        self._user_data.pop(user_id, None)
+        if self.flush_on_update:
+            self.flush()
 
-    # ---- callback_data ----
-    async def get_callback_data(self) -> Dict[str, Any]:
-        self._ensure_loaded()
-        if not self._callback_data:
-            row = self._get_row(_k_callback())
-            if isinstance(row, dict):
-                self._callback_data = row
-        return self._callback_data
+    def drop_chat_data(self, chat_id: int) -> None:
+        self._chat_data.pop(chat_id, None)
+        if self.flush_on_update:
+            self.flush()
 
-    async def update_callback_data(self, data: Dict[str, Any]) -> None:
-        self._ensure_loaded()
-        self._callback_data = data or {}
-        self._upsert_row(_k_callback(), self._callback_data)
+    def refresh_user_data(self, user_id: int, user_data: Dict[str, Any]) -> None:
+        # Современные PTB обычно не зовут это часто; поддержим для совместимости
+        self._user_data[user_id] = user_data
+        if self.flush_on_update:
+            self.flush()
 
-    # ---- flush ----
-    async def flush(self) -> None:
-        # Принудительно записать всё, что в кэше, в БД
-        if self.store_user_data:
-            for uid, data in self._user_data.items():
-                self._upsert_row(_k_user(uid), data or {})
-        if self.store_chat_data:
-            for cid, data in self._chat_data.items():
-                self._upsert_row(_k_chat(cid), data or {})
-        if self.store_bot_data:
-            self._upsert_row(_k_bot(), self._bot_data or {})
-        # conversations
-        for name, conv in self._conversations.items():
-            to_store: Dict[str, Any] = {json.dumps(list(k)): v for k, v in conv.items()}
-            self._upsert_row(_k_conversations(name), to_store)
-        # callback
-        if self._callback_data is not None:
-            self._upsert_row(_k_callback(), self._callback_data or {})
-    
-    async def health_check(self) -> None:
-        """
-        Простая проверка работоспособности:
-        1) убеждаемся, что таблица существует (попытка select ограниченного ключа)
-        2) пробуем минимальный upsert+delete тестовой записи
-        Если что-то не так — бросаем исключение.
-        """
+    def refresh_chat_data(self, chat_id: int, chat_data: Dict[str, Any]) -> None:
+        self._chat_data[chat_id] = chat_data
+        if self.flush_on_update:
+            self.flush()
 
-    # 1) лёгкий SELECT по фиксированному ключу
-    try:
-        _ = self.client.table(self.table).select("id").limit(1).execute()
-    except Exception as e:
-        raise RuntimeError(f"Cannot select from table '{self.table}': {e}")
-
-    # 2) round-trip запись/чтение/удаление
-    probe_id = "__healthcheck__"
-    try:
-        self.client.table(self.table).upsert({"id": probe_id, "data": {"ok": True}}).execute()
-        got = self.client.table(self.table).select("data").eq("id", probe_id).execute()
-        if not got.data:
-            raise RuntimeError("Upsert succeeded but select returned no data")
-    except Exception as e:
-        raise RuntimeError(f"Cannot upsert/select in '{self.table}': {e}")
-    finally:
+    def flush(self) -> None:
+        """Сохраняем весь срез данных в Supabase одним upsert."""
+        rows = [
+            {"id": f"{self.prefix}:user_data", "data": self._user_data},
+            {"id": f"{self.prefix}:chat_data", "data": self._chat_data},
+            {"id": f"{self.prefix}:bot_data", "data": self._bot_data},
+            {
+                "id": f"{self.prefix}:conversations",
+                "data": self._conversations_encode(self._conversations),
+            },
+            {"id": f"{self.prefix}:callback_data", "data": self._callback_data},
+        ]
         try:
-            self.client.table(self.table).delete().eq("id", probe_id).execute()
+            self.client.table(self.table).upsert(rows).execute()
         except Exception:
-            # Не критично, но сообщим в логи через стандартный логгер
-            import logging
-            logging.getLogger("app.handlers").warning("Healthcheck cleanup failed", exc_info=True)
+            # Никогда не роняем приложение из-за временных проблем, пусть верхний уровень решает ретраи
+            log.exception("Supabase upsert failed in flush()")
+
+    # ---------- Приватные методы загрузки/сериализации ----------
+
+    def _load_all(self) -> None:
+        """Ленивая загрузка всех пяти сегментов из таблицы."""
+        ids = [
+            f"{self.prefix}:user_data",
+            f"{self.prefix}:chat_data",
+            f"{self.prefix}:bot_data",
+            f"{self.prefix}:conversations",
+            f"{self.prefix}:callback_data",
+        ]
+        try:
+            resp = self.client.table(self.table).select("id, data").in_("id", ids).execute()
+        except Exception:
+            log.exception("Supabase select failed in _load_all()")
+            # оставим пустые структуры
+            return
+
+        data_map: Dict[str, Any] = {row["id"]: row.get("data") for row in (resp.data or [])}
+
+        # user_data
+        ud = data_map.get(f"{self.prefix}:user_data") or {}
+        if isinstance(ud, dict):
+            # defaultdict(int->dict)
+            self._user_data = defaultdict(dict, {int(k): v for k, v in ud.items()})
+        else:
+            self._user_data = defaultdict(dict)
+
+        # chat_data
+        cd = data_map.get(f"{self.prefix}:chat_data") or {}
+        if isinstance(cd, dict):
+            self._chat_data = defaultdict(dict, {int(k): v for k, v in cd.items()})
+        else:
+            self._chat_data = defaultdict(dict)
+
+        # bot_data
+        bd = data_map.get(f"{self.prefix}:bot_data") or {}
+        if isinstance(bd, dict):
+            self._bot_data = bd
+        else:
+            self._bot_data = {}
+
+        # conversations
+        conv = data_map.get(f"{self.prefix}:conversations") or {}
+        if isinstance(conv, dict):
+            self._conversations = self._conversations_decode(conv)
+        else:
+            self._conversations = {}
+
+        # callback_data
+        cb = data_map.get(f"{self.prefix}:callback_data") or {}
+        if isinstance(cb, dict):
+            self._callback_data = cb
+        else:
+            self._callback_data = {}
+
+    @staticmethod
+    def _conversations_encode(
+        conv: Dict[str, Dict[Tuple[Hashable, Hashable], Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Превращаем ключи (chat_id, thread_id) в строки для JSON.
+        """
+        out: Dict[str, Dict[str, Any]] = {}
+        for name, mapping in conv.items():
+            encoded: Dict[str, Any] = {}
+            for key_tuple, state in mapping.items():
+                encoded[_conv_key_encode(key_tuple)] = state
+            out[name] = encoded
+        return out
+
+    @staticmethod
+    def _conversations_decode(
+        data: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, Dict[Tuple[Hashable, Hashable], Any]]:
+        out: Dict[str, Dict[Tuple[Hashable, Hashable], Any]] = {}
+        for name, mapping in data.items():
+            decoded: Dict[Tuple[Hashable, Hashable], Any] = {}
+            for key_str, state in (mapping or {}).items():
+                decoded[_conv_key_decode(key_str)] = state
+            out[name] = decoded
+        return out
