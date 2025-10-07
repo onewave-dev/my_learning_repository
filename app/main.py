@@ -1,13 +1,12 @@
 import os
 import logging
-import json
+import tempfile
 import asyncio
 
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update
 from telegram.ext import (Application, CommandHandler, MessageHandler,
-    filters, ConversationHandler, CallbackQueryHandler,
-    PicklePersistence
+    filters, ConversationHandler, CallbackQueryHandler
 )
 from supabase import create_client, Client
 from app.handlers import (
@@ -17,9 +16,8 @@ from app.handlers import (
     unknown_command, non_text, global_throttle
 )
 from contextlib import asynccontextmanager
-
 from app.supabase_persistence import SupabasePersistence
-
+log = logging.getLogger("app")
 # --- ВЕРХ ФАЙЛА (рядом с импортами) ---
 def _probe(tag):
     async def _inner(update, context):
@@ -34,7 +32,6 @@ def _probe(tag):
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "jslkdji&8987812kjkj9989l_lki")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
-DATA_PATH = os.getenv("DATA_PATH", "/var/data")
 
 
 # ✅ Настройка уровня логирования
@@ -62,26 +59,30 @@ async def lifespan(app: FastAPI):
     if not TELEGRAM_BOT_TOKEN:
         log.error("TELEGRAM_BOT_TOKEN is empty — set it in env")
         raise RuntimeError("No TELEGRAM_BOT_TOKEN")
-    
-    # 🔹 гарантируем, что путь существует (работает в рантайме на диске)
-    os.makedirs(DATA_PATH, exist_ok=True)
-
 
     # 🔹 файл состояния на диске
     SUPABASE_URL = os.getenv("SUPABASE_URL")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY") 
-    if SUPABASE_URL and SUPABASE_KEY:
-        persistence = SupabasePersistence(SUPABASE_URL, SUPABASE_KEY)
-        log.info("Using SupabasePersistence")
-    else:
-        os.makedirs(DATA_PATH, exist_ok=True)
-        persistence = PicklePersistence(filepath=os.path.join(DATA_PATH, "bot_state.pkl"))
-        log.warning("SUPABASE_* env not set → using PicklePersistence at %s", DATA_PATH)
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        log.error("SUPABASE_URL/SUPABASE_KEY are required in env for persistence")
+        raise RuntimeError("Supabase credentials are missing")
+
+    # ✅ Только SupabasePersistence
+    persistence = SupabasePersistence(SUPABASE_URL, SUPABASE_KEY)
+
+    # 🔎 Fail-fast: проверяем доступ к БД/таблице прямо на старте
+    try:
+        await persistence.health_check()   # добавим метод ниже в классе
+        log.info("Supabase health-check OK — running in Supabase-only mode")
+    except Exception as e:
+        log.exception("Supabase health-check FAILED: %s", e)
+        raise RuntimeError(f"Supabase is not available: {e}")
+    
     tg_app = (
-    Application.builder()
-    .token(TELEGRAM_BOT_TOKEN)
-    .persistence(persistence)
-    .build()
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .persistence(persistence)
+        .build()
     )
 
     # ⬇️ Регистрируем хэндлеры PTB

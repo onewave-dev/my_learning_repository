@@ -211,3 +211,34 @@ class SupabasePersistence(BasePersistence):
         # callback
         if self._callback_data is not None:
             self._upsert_row(_k_callback(), self._callback_data or {})
+    
+    async def health_check(self) -> None:
+        """
+        Простая проверка работоспособности:
+        1) убеждаемся, что таблица существует (попытка select ограниченного ключа)
+        2) пробуем минимальный upsert+delete тестовой записи
+        Если что-то не так — бросаем исключение.
+        """
+
+    # 1) лёгкий SELECT по фиксированному ключу
+    try:
+        _ = self.client.table(self.table).select("id").limit(1).execute()
+    except Exception as e:
+        raise RuntimeError(f"Cannot select from table '{self.table}': {e}")
+
+    # 2) round-trip запись/чтение/удаление
+    probe_id = "__healthcheck__"
+    try:
+        self.client.table(self.table).upsert({"id": probe_id, "data": {"ok": True}}).execute()
+        got = self.client.table(self.table).select("data").eq("id", probe_id).execute()
+        if not got.data:
+            raise RuntimeError("Upsert succeeded but select returned no data")
+    except Exception as e:
+        raise RuntimeError(f"Cannot upsert/select in '{self.table}': {e}")
+    finally:
+        try:
+            self.client.table(self.table).delete().eq("id", probe_id).execute()
+        except Exception:
+            # Не критично, но сообщим в логи через стандартный логгер
+            import logging
+            logging.getLogger("app.handlers").warning("Healthcheck cleanup failed", exc_info=True)
