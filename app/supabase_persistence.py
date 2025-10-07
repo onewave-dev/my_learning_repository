@@ -116,6 +116,7 @@ class SupabasePersistence(BasePersistence):
 
     def get_conversations(self, name: str) -> Dict[Tuple[Hashable, Hashable], Any]:
         return self._conversations.get(name, {})
+    
 
     # --- update* вызываются PTB после каждого изменения данных ---
 
@@ -137,6 +138,11 @@ class SupabasePersistence(BasePersistence):
         if not self.store_data.bot_data:
             return
         self._bot_data = data
+        if self.flush_on_update:
+            self.flush()
+            
+    def refresh_bot_data(self, bot_data: Dict[str, Any]) -> None:
+        self._bot_data = bot_data or {}
         if self.flush_on_update:
             self.flush()
 
@@ -285,3 +291,4 @@ class SupabasePersistence(BasePersistence):
                 decoded[_conv_key_decode(key_str)] = state
             out[name] = decoded
         return out
+    
