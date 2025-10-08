@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, Hashable, Tuple, Optional
 
@@ -103,110 +104,81 @@ class SupabasePersistence(BasePersistence):
 
     async def get_user_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._user_data
-
     async def get_chat_data(self) -> DefaultDict[int, Dict[str, Any]]:
         return self._chat_data
-
     async def get_bot_data(self) -> Dict[str, Any]:
         return self._bot_data
-
     async def get_callback_data(self) -> Optional[Dict[str, Any]]:
         return self._callback_data
-
     async def get_conversations(self, name: str) -> Dict[Tuple[Hashable, Hashable], Any]:
         return self._conversations.get(name, {})
         
 
     # --- update* вызываются PTB после каждого изменения данных ---
 
-    def update_user_data(self, user_id: int, data: Dict[str, Any]) -> None:
-        if not self.store_data.user_data:
-            return
+    async def update_user_data(self, user_id: int, data: Dict[str, Any]) -> None:
+        if not self.store_data.user_data: return
         self._user_data[user_id] = data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def update_chat_data(self, chat_id: int, data: Dict[str, Any]) -> None:
-        if not self.store_data.chat_data:
-            return
+    async def update_chat_data(self, chat_id: int, data: Dict[str, Any]) -> None:
+        if not self.store_data.chat_data: return
         self._chat_data[chat_id] = data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def update_bot_data(self, data: Dict[str, Any]) -> None:
-        if not self.store_data.bot_data:
-            return
+    async def update_bot_data(self, data: Dict[str, Any]) -> None:
+        if not self.store_data.bot_data: return
         self._bot_data = data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def refresh_bot_data(self, bot_data: Dict[str, Any]) -> None:
-        self._bot_data = bot_data or {}
-        if self.flush_on_update:
-            self.flush()
-
-    def update_callback_data(self, data: Dict[str, Any]) -> None:
-        if not self.store_data.callback_data:
-            return
+    async def update_callback_data(self, data: Dict[str, Any]) -> None:
+        if not self.store_data.callback_data: return
         self._callback_data = data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def update_conversation(
-        self,
-        name: str,
-        key: Tuple[Hashable, Hashable],
-        new_state: Any,
-    ) -> None:
-        if not self.store_data.conversations:
-            return
+    async def update_conversation(self, name: str, key: Tuple[Hashable, Hashable], new_state: Any) -> None:
+        if not self.store_data.conversations: return
         conv = self._conversations.setdefault(name, {})
-        if new_state is None:
-            # PTB convention: remove conversation when state is None
-            conv.pop(key, None)
-        else:
-            conv[key] = new_state
-        if self.flush_on_update:
-            self.flush()
+        if new_state is None: conv.pop(key, None)
+        else: conv[key] = new_state
+        if self.flush_on_update: await self.flush()
 
-    def drop_user_data(self, user_id: int) -> None:
+    async def drop_user_data(self, user_id: int) -> None:
         self._user_data.pop(user_id, None)
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def drop_chat_data(self, chat_id: int) -> None:
+    async def drop_chat_data(self, chat_id: int) -> None:
         self._chat_data.pop(chat_id, None)
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def refresh_user_data(self, user_id: int, user_data: Dict[str, Any]) -> None:
-        # Современные PTB обычно не зовут это часто; поддержим для совместимости
+    async def refresh_user_data(self, user_id: int, user_data: Dict[str, Any]) -> None:
         self._user_data[user_id] = user_data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def refresh_chat_data(self, chat_id: int, chat_data: Dict[str, Any]) -> None:
+    async def refresh_chat_data(self, chat_id: int, chat_data: Dict[str, Any]) -> None:
         self._chat_data[chat_id] = chat_data
-        if self.flush_on_update:
-            self.flush()
+        if self.flush_on_update: await self.flush()
 
-    def flush(self) -> None:
-        """Сохраняем весь срез данных в Supabase одним upsert."""
+    async def refresh_bot_data(self, bot_data: Dict[str, Any]) -> None:
+        self._bot_data = bot_data or {}
+        if self.flush_on_update: await self.flush()
+        
+    def _flush_sync(self) -> None:
         rows = [
             {"id": f"{self.prefix}:user_data", "data": self._user_data},
             {"id": f"{self.prefix}:chat_data", "data": self._chat_data},
             {"id": f"{self.prefix}:bot_data", "data": self._bot_data},
-            {
-                "id": f"{self.prefix}:conversations",
-                "data": self._conversations_encode(self._conversations),
-            },
+            {"id": f"{self.prefix}:conversations", "data": self._conversations_encode(self._conversations)},
             {"id": f"{self.prefix}:callback_data", "data": self._callback_data},
         ]
         try:
             self.client.table(self.table).upsert(rows).execute()
         except Exception:
-            # Никогда не роняем приложение из-за временных проблем, пусть верхний уровень решает ретраи
             log.exception("Supabase upsert failed in flush()")
+
+    async def flush(self) -> None:
+        # выполняем синхронный upsert в пуле потоков, чтобы не блокировать loop
+        await asyncio.to_thread(self._flush_sync)
 
     # ---------- Приватные методы загрузки/сериализации ----------
 
