@@ -162,26 +162,19 @@ async def healthz():
     return {"status": "ok"}
 
 @app.post("/webhook")
-async def telegram_webhook(request: Request):  
-    # проверка: заголовок от Telegram
+async def telegram_webhook(request: Request):
+    # NEW: видим, что вообще до нас дошёл запрос и какие заголовки пришли
+    log.info("Webhook hit: method=%s, headers=%s", request.method, dict(request.headers))
+
     header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if header_secret != WEBHOOK_SECRET:
-        log.warning("Webhook header secret mismatch")
+        log.warning("Webhook header secret mismatch: got=%r expected=%r", header_secret, WEBHOOK_SECRET)
         raise HTTPException(status_code=403, detail="bad header secret")
-    log.debug("Header OK, update accepted")
+    log.info("Webhook header OK")
 
-    # 1) Читаем JSON из запроса
     data = await request.json()
-
-    # 2) Превращаем JSON в объект Update (это PTB-шный класс)
     update = Update.de_json(data, app.state.tg_app.bot)
-
-    # 3) Кладём Update в очередь PTB
-    # await app.state.tg_app.update_queue.put(update)
-
-    # 3a) ✅ Напрямую передаём апдейт в PTB (минуя очередь)
     await app.state.tg_app.process_update(update)
-
-    log.debug("Update forwarded to PTB")
+    log.info("Update forwarded to PTB (ok)")
     return {"ok": True}
 
