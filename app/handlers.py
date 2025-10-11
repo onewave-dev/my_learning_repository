@@ -13,34 +13,47 @@ log = logging.getLogger("app.handlers")  # дочерний логгер
 
 THROTTLE_SECONDS = 1.0  # задержка от спама, время можно менять под себя
 
+
 # глобальный throttle (защита от бот-сообщений)
 async def global_throttle(update, context):
     """
-    Пропускает команды всегда.
-    Троттлит только обычные сообщения, если они слишком частые.
-    Работает ТОЛЬКО на Message updates (см. регистрацию ниже).
+    Пропускает команды и callback_query всегда.
+    Троттлит только обычные Message-апдейты, если они слишком частые.
     """
+    # 0) Пропускаем callback_query
+    if getattr(update, "callback_query", None):
+        return
+
     msg = getattr(update, "effective_message", None)
     if not msg:
-        return  # не message-апдейт -> нас это не касается
+        return  # не Message-апдейт
 
-    # 1) Команды пропускаем всегда (и не трогаем last_msg_ts)
-    if (msg.entities and any(ent.type == MessageEntityType.BOT_COMMAND for ent in msg.entities)) \
-       or (msg.text and msg.text.startswith("/")):
+    # 1) Пропускаем команды (в тексте ИЛИ в подписи)
+    entities = (msg.entities or []) + (msg.caption_entities or [])
+    if any(getattr(ent, "type", None) == MessageEntityType.BOT_COMMAND for ent in entities) \
+       or (msg.text and msg.text.startswith("/")) \
+       or (msg.caption and msg.caption.startswith("/")):
         return
 
     now = datetime.now(timezone.utc).timestamp()
+
+    # Вариант A: пер-пользователь (как у тебя)
+    store = context.user_data
+    # Вариант B: пер-чат (если нужно) -> store = context.chat_data
+
+    last = 0.0
     try:
-        last = float(context.user_data.get("last_msg_ts", 0.0))
+        last = float(store.get("last_msg_ts", 0.0))
     except Exception:
-        last = 0.0
+        pass
 
-    # 2) Если слишком часто — стопим цепочку хэндлеров (но без падений)
     if last and (now - last) < THROTTLE_SECONDS:
+        # жёстко:
         raise ApplicationHandlerStop()
+        # мягко: return
 
-    # 3) Иначе обновляем таймстамп и пропускаем дальше
-    context.user_data["last_msg_ts"] = now
+    store["last_msg_ts"] = now
+
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
