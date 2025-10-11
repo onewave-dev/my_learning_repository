@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, non_text), group=0)
 
     # 7) Неизвестные команды — САМОЕ ПОСЛЕДНЕЕ
-    tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command), group=1000)   
+    tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command), group=-100)   
         
     # 
     app.state.tg_app = tg_app
