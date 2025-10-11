@@ -49,7 +49,7 @@ async def global_throttle(update, context):
 
     if last and (now - last) < THROTTLE_SECONDS:
         # жёстко:
-        raise ApplicationHandlerStop()
+        return
         # мягко: return
 
     store["last_msg_ts"] = now

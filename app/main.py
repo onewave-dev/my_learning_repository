@@ -86,33 +86,35 @@ async def lifespan(app: FastAPI):
     )
 
     # ⬇️ Регистрируем хэндлеры PTB
-    tg_app.add_handler(MessageHandler(filters.ALL, _probe("A:TOP"), block=False), group=0) # 0a. Зонд до всего (он НЕ блокирует)
-    tg_app.add_handler(MessageHandler(filters.ALL, global_throttle, block=False), group=0) # всегда в самом начале
-    # 0c. Зонд прямо перед командами (чтобы видеть, что до сюда дошло)
-    tg_app.add_handler(MessageHandler(filters.ALL, _probe("B:BEFORE_CMDS"), block=False), group=0)
-    tg_app.add_handler(CommandHandler("start", start))
-    log.info("Start handler registered")
-    tg_app.add_handler(CommandHandler("whoami", whoami))
-    tg_app.add_handler(CommandHandler("help", help_command))
-    tg_app.add_handler(CommandHandler("settings", settings_command))
+    # 0) Диагностические зонды — только логируют, ничего не блокируют
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("A:TOP"), block=False), group=-1100)
 
-    # 1b. Зонд после команд
-    tg_app.add_handler(MessageHandler(filters.ALL, _probe("C:AFTER_CMDS"), block=False), group=0)
-    tg_app.add_handler(CallbackQueryHandler(settings_callback, pattern=r"^settings:"))
-    # Диалог: /survey -> спросить имя -> ответ -> завершить
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("survey", survey_start)],  # точка входа по /survey
-        states={
-            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, survey_name)],  # ждём текст имени
-        },
-        fallbacks=[CommandHandler("cancel", survey_cancel)],  # /cancel на любом шаге — выход
-        allow_reentry=True,  # позволит заново зайти в диалог, даже если пользователь был в нём
-    )
-    tg_app.add_handler(conv)
-    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    tg_app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, non_text))     # всё, что не текст и не команды: фото, стикеры, файлы и т.д.
-    tg_app.add_error_handler(error_handler)
-    tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))     # Этот хэндлер ДОЛЖЕН быть последним, чтобы не перехватывать известные команды
+    # 1) Глобальный троттлер — ДО всего; команды и callback он пропускает ранним return
+    tg_app.add_handler(MessageHandler(filters.ALL, global_throttle, block=False), group=-1000)
+
+    # 2) Зонд прямо перед командами
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("B:BEFORE_CMDS"), block=False), group=-200)
+
+    # 3) КОМАНДЫ — отдельной группой ДО любых catch-all
+    tg_app.add_handler(CommandHandler("start", start), group=-100)
+    tg_app.add_handler(CommandHandler("whoami", whoami), group=-100)
+    tg_app.add_handler(CommandHandler("help", help_command), group=-100)
+    tg_app.add_handler(CommandHandler("settings", settings_command), group=-100)
+
+    # 4) Зонд после команд
+    tg_app.add_handler(MessageHandler(filters.ALL, _probe("C:AFTER_CMDS"), block=False), group=-50)
+
+    # 5) CallbackQuery — после команд
+    tg_app.add_handler(CallbackQueryHandler(settings_callback), group=0)
+
+    # 6) Остальные обработчики сообщений (НЕ команды)
+    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo), group=0)
+    tg_app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, non_text), group=0)
+
+    # 7) Неизвестные команды — САМОЕ ПОСЛЕДНЕЕ
+    tg_app.add_handler(MessageHandler(filters.COMMAND, unknown_command), group=1000)   
+        
+    # 
     app.state.tg_app = tg_app
     log.info("PTB Application created")
 
@@ -178,3 +180,16 @@ async def telegram_webhook(request: Request):
     log.info("Update forwarded to PTB (ok)")
     return {"ok": True}
 
+@app.get("/webhook-info")
+async def webhook_info():
+    info = await app.state.tg_app.bot.get_webhook_info()
+    # вернём как словарь для удобства
+    return {
+        "url": info.url,
+        "has_custom_certificate": info.has_custom_certificate,
+        "pending_update_count": info.pending_update_count,
+        "last_error_date": info.last_error_date,
+        "last_error_message": info.last_error_message,
+        "max_connections": info.max_connections,
+        "ip_address": info.ip_address,
+    }
